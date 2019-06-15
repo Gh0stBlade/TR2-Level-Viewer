@@ -12,23 +12,24 @@ public class ButtlerStatePlayer : MonoBehaviour {
 	
 	int Walk = 0;
 	int Jump = 0;
-	int Idle = 0;
+	int Idle = 2;
 	int Run = 0;
 	int Attack = 0;
 	
 	int m_PrevKeyState = 0;
 	int m_CurrentKeyState = 0;
 	Animation m_Animation = null;
-	
-	// Use this for initialization
-	void Start () 
+    Transform m_Transform;
+    // Use this for initialization
+    void Start () 
 	{
 		m_Animation = GetComponent<Animation>();
 		m_CurrentKeyState = Idle;
 		m_StartPos = transform.position;
 		m_TargetPos = m_StartPos;
 		DayNightSystem.AddDayNightEventHandler(UpdateDayNight);
-	}
+        m_Transform = transform;
+    }
 
 	// Update is called once per frame
 	void Update () {
@@ -41,12 +42,17 @@ public class ButtlerStatePlayer : MonoBehaviour {
 		if(m_FollowTransform!=null)
 		{
 			m_TargetPos = m_FollowTransform.position;
-			transform.forward = (m_TargetPos - transform.position).normalized;
-			float dist = (m_FollowTransform.position - transform.position).magnitude;
-			if(dist > 2048 )
+            Vector3 direction = (m_TargetPos - m_Transform.position);
+            direction.y = 0;
+            m_Transform.forward = direction.normalized;
+        
+      
+			if(direction.magnitude > (2024 * Settings.SceneScaling) )
 			{
 				m_CurrentKeyState = Walk;
-				transform.position = Vector3.Lerp(transform.position ,m_TargetPos,Time.deltaTime * 0.05f);
+                Vector3 pos = Vector3.Lerp(m_Transform.position, m_TargetPos, Time.deltaTime * 0.15f);
+                pos.y = m_TargetPos.y;
+                m_Transform.position = pos;
 			}
 			else
 			{

@@ -3,46 +3,93 @@ using System.Collections;
 using System.Collections.Generic;
 
 public class RoomEx: MonoBehaviour  {
-	public SurfaceAnalyzer m_RoomAnalyzer;
-	public Parser.Tr2Room m_Tr2Room;
-	public Mesh m_Mesh;
+	SurfaceAnalyzer m_RoomAnalyzer;
+	Parser.Tr2Room m_Tr2Room;
+    Mesh m_Mesh;
 	Vector3[] m_RoomVertices;
 	public Transform m_Transform;
 	int ID = 0;
-	public int[] m_SharedTriangles = null;
+	int[] m_SharedTriangles = null;
 	List<Edge> m_RoomEdges = null;
-
+	float m_CeilingHeight = -Mathf.Infinity;
+	float m_FloorHeight = Mathf.Infinity;
 	public List<GameObject> m_StaticObjects = null;
+	public Material m_Material;
+    //Parser.Tr2Level m_leveldata = null;
+    public Vector3 m_CenterPoint = Vector3.zero;
+    public Bounds m_RoomBound; // made public for serialization
+    public short Flags = 0;
+    Vector3[] m_PortalPolygon;
+    public enum RoomType
+    {
+        Land = 0,
+        DeepWater,
+        ShalloWater,
+        WaterFilled,
+        Ice
+    }
 
-	Parser.Tr2Level m_leveldata = null;
+    public RoomType m_RoomType = RoomType.Land;
 
-	void Start()
+    void Start()
 	{
-		m_RoomVertices = m_Mesh.vertices;
+        m_Mesh = GetComponent<MeshFilter>().mesh;
+        m_RoomVertices = m_Mesh.vertices;
 		m_SharedTriangles = MeshModifier.GetSharedTriangles(m_Mesh);
 		m_RoomAnalyzer = new SurfaceAnalyzer(m_Mesh);
 		m_RoomEdges = m_RoomAnalyzer.Analyze(m_RoomVertices, m_SharedTriangles,null);
+		m_Material = GetComponent<MeshRenderer>().sharedMaterial;
 	}
 
 	void Update()
 	{
-
+        if(m_PortalPolygon != null)
+        for(int i = 0; i < m_PortalPolygon.Length; i++)
+        {
+            int id = (i + 1) % m_PortalPolygon.Length;
+            Debug.DrawLine(transform.TransformPoint(m_PortalPolygon[i]), transform.TransformPoint(m_PortalPolygon[id]), Color.yellow);
+        }
 	}
 
 	public void  InitRoom(Parser.Tr2Room room, List<GameObject> objects)
 	{
-		m_leveldata = Level.m_leveldata;
+	
+#if UNITY_EDITOR
+		m_Mesh = GetComponent<MeshFilter>().sharedMesh;
+#else
 		m_Mesh = GetComponent<MeshFilter>().mesh;
+#endif 
+		
 		m_Transform = transform;
 		m_StaticObjects = objects;
 		m_Tr2Room = room;
-		
-		//These are not serialised by Editor. Move them to Start()
-		//m_RoomVertices = m_Mesh.vertices;
-		//m_SharedTriangles = MeshModifier.GetSharedTriangles(m_Mesh);
-		//m_RoomAnalyzer = new SurfaceAnalyzer(m_Mesh);
-		//m_RoomEdges = m_RoomAnalyzer.Analyze(m_RoomVertices, m_SharedTriangles,null);
-	}
+
+        //These are not serialised by Editor. Move them to Start()
+        //m_RoomVertices = m_Mesh.vertices;
+        //m_SharedTriangles = MeshModifier.GetSharedTriangles(m_Mesh);
+        //m_RoomAnalyzer = new SurfaceAnalyzer(m_Mesh);
+        //m_RoomEdges = m_RoomAnalyzer.Analyze(m_RoomVertices, m_SharedTriangles,null);
+
+        /*
+         * Update: Calculate center point of room, useful for vertex modultion
+         * */
+
+        float room_width = room.NumXsectors * 1024 * Settings.SceneScaling;
+        float room_depth = room.NumZsectors * 1024 * Settings.SceneScaling;
+        float bottom = (-room.info.yBottom * Settings.SceneScaling);
+        float surface = (-room.info.yTop * Settings.SceneScaling);
+        float x = transform.position.x;
+        float z = transform.position.z;
+        m_CenterPoint = new Vector3(x, bottom, z) + new Vector3(room_width, (surface - bottom) * 2, room_depth) * 0.5f;// - transform.position; //in world space
+
+        m_RoomBound = new Bounds(m_CenterPoint, Vector3.zero);
+        m_RoomBound.SetMinMax(new Vector3(x, bottom, z), new Vector3(x + room_width, surface, z + room_depth));
+
+        m_RoomType = DetectRoomType(room, m_RoomBound);
+        Flags = m_Tr2Room.Flags;
+
+        m_PortalPolygon = GetWaterPortal(room);
+    }
 
 	public void DebugRoomSurface()
 	{
@@ -88,7 +135,7 @@ public class RoomEx: MonoBehaviour  {
 		List<Edge> edges = new List<Edge>();
 		if(faceid != -1)
 		{
-			Debug.Log("Room.RayCast:" + faceid);
+			//Debug.Log("Room.RayCast:" + faceid);
 			Triangle face = m_RoomAnalyzer.LodTriangles[faceid];
 			int ntrycount = 0;
 
@@ -210,4 +257,77 @@ public class RoomEx: MonoBehaviour  {
 
 		return edges;
 	}
+	
+	public  Material GetRoomMaterial()
+	{
+		return m_Material;
+	}
+	
+	//Added method GetRoomMaterial() to modify shared mat
+
+    public Vector3 GetCenterPoint()
+    {
+        return m_CenterPoint;
+    }
+
+    public Bounds GetBound()
+    {
+        return m_RoomBound;
+    }
+
+
+    RoomType DetectRoomType(Parser.Tr2Room room, Bounds b )
+    {
+        if ((room.Flags & 1) == 1) //water room below, bug: direct use of Flags causing error
+        {
+            //calculate water depth
+            b = GetBound();
+            if (b.size.y > 0.75)
+            {
+                return RoomType.DeepWater;
+            }
+            else
+            {
+                return RoomType.ShalloWater;
+            }
+
+        }
+        return RoomType.Land;
+    }
+
+    public RoomType GetRoomType()
+    {
+        return m_RoomType;
+    }
+
+    public static Vector3[] GetWaterPortal(Parser.Tr2Room room)
+    {
+        Vector3[] portal_polygon = null;
+        float surface = (-room.info.yTop * Settings.SceneScaling); //get scaled room surface point
+        int Flags = room.Flags;
+        if (Flags == 72  || (Flags & 1) == 1)
+        {
+            if (room.Portals != null)
+            {
+                for (int p = 0; p < room.Portals.Length; p++)
+                {
+                    Parser.Tr2RoomPortal port = room.Portals[p];
+                    Parser.Tr2Vertex n = port.Normal;
+                    if ((Vector3.Dot(new Vector3(n.y, n.y, n.z), Vector3.right) > 0.85f) && (port.Vertices != null))  // choose only horizontal portals
+                    {
+                        portal_polygon = new Vector3[port.Vertices.Length];
+                        for (int i = 0; i < portal_polygon.Length; i++)
+                        {
+                            portal_polygon[i] = new Vector3(port.Vertices[i].x * Settings.SceneScaling, surface, port.Vertices[i].z * Settings.SceneScaling);
+                        }
+
+                        break;
+                    }
+
+                }
+            }
+        }
+
+        return portal_polygon;
+    }
 }

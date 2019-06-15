@@ -1,11 +1,11 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.IO;
 
 public class TextureUV  {
 
 	static Rect[] uvRects = null;
-	static float cmult = 0.00392156862745098f;
+	static float cmult = 0.032258064516129f;
 
 	public static float AdjustTextureCoordinateX(byte pixel, sbyte offset, ushort texTileIdx)
 	{   		
@@ -78,12 +78,13 @@ public class TextureUV  {
 	public static Texture2D GenerateTextureTile(Parser.Tr2Level leveldata)
 	{
 		int c16_index = 0;
+        int c16_pixel_count = 256 * 256; // pixel count optimization
 		Color[][] ColorTable = new Color[leveldata.m_MaxTiles][];
 		for(int tileCount = 0; tileCount < leveldata.m_MaxTiles; tileCount++)
 		{ 
 			
-			ColorTable[tileCount] = new Color[256 * 256];
-			for(int c = 0 ; c < (256 * 256); c++)
+			ColorTable[tileCount] = new Color[c16_pixel_count];
+			for(int c = 0 ; c < c16_pixel_count; c++)
 			{
 				ColorTable[tileCount][c] = Color.white;
 			}
@@ -91,12 +92,12 @@ public class TextureUV  {
 			
 			ushort[] tmparr = leveldata.Textile16[tileCount].Tile;
 			Color[] cols = ColorTable[tileCount];
-			for(c16_index = 0 ; c16_index < (256 * 256) ; c16_index++)
+			for(c16_index = 0 ; c16_index < c16_pixel_count; c16_index++)
 			{
 				//argb
 				ushort ucolor = tmparr[c16_index];
 				
-				if(((ucolor >> 15) & 0x1) == 1)
+				if((ucolor & 0x8000) == 0x8000) ////optimized bit shift and & operation ((ucolor >> 15) & 0x1) == 1 with direct & (ucolor & 0x8000) == 1 operation
 				{
 					cols[c16_index].a = 1.0f;
 				}
@@ -104,48 +105,155 @@ public class TextureUV  {
 				{
 					cols[c16_index].a = 0.0f;
 				}
+				//fix color conversion with range 0 - 31
+				cols[c16_index].b = (ucolor & 0x1f)  * cmult;
+				cols[c16_index].g = ((ucolor >> 5) & 0x1f) * cmult;
+				cols[c16_index].r = ((ucolor >> 10) & 0x1f) * cmult;
+                //Vector3 alpha_vec = new Vector3(cols[c16_index].r, cols[c16_index].g, cols[c16_index].b);
+                //if(alpha_vec.magnitude <= 0.097)
+                //{
+                    //cols[c16_index].a = 0.0f;
+                //}
+            }
+			//render transparancy information into tile
+			int ntexObj = leveldata.ObjectTextures.Length;
+			for(int i = 0; i < ntexObj; i++)
+			{
+				Parser.Tr2ObjectTexture texobj = leveldata.ObjectTextures[i];
 				
-				cols[c16_index].b = ((ucolor & 0x1f) * 8) * cmult;
-				cols[c16_index].g = (((ucolor >> 5) & 0x1f) * 8) * cmult;
-				cols[c16_index].r = (((ucolor >> 10) & 0x1f) * 8) * cmult;
-			}			
-		}
+				
+				// texobj.TransparencyFlags means geometry level transparancy, not pixel level transparency
+				// this is used for geometry material batching
+
+				if(texobj.Tile == tileCount && texobj.TransparencyFlags == 0) 	
+				{
+					//interpolate pixels
+					//generate pixel bound
+					Parser.Tr2ObjectTextureVertex[] vertices =  texobj.Vertices;
+					
+					int minxi = vertices[0].Xpixel;
+					int maxxi = vertices[0].Xpixel;
+					int minyi = vertices[0].Ypixel;
+					int maxyi = vertices[0].Ypixel;
+					
+					for(int v = 0; v < vertices.Length - 1; v++)
+					{
+						if(vertices[v].Xcoordinate < minxi)
+						{
+							minxi = vertices[v].Xpixel;
+						}
+						
+						if(vertices[v].Xcoordinate > maxxi)
+						{
+							maxxi = vertices[v].Xpixel;
+						}
+						
+						if(vertices[v].Ycoordinate < minyi)
+						{
+							minyi = vertices[v].Ypixel;
+						}
+						
+						if(vertices[v].Ycoordinate > maxyi)
+						{
+							maxyi = vertices[v].Ypixel;
+						}
+
+					}
+					
+					//render transparancy in generated bound
+					
+					if(vertices.Length < 4)
+					{
+					
+						Vector3 p0 = new Vector3(vertices[0].Xpixel,  0, vertices[0].Ypixel );
+						Vector3 p1 = new Vector3(vertices[1].Xpixel,  0, vertices[1].Ypixel );
+						Vector3 p2 = new Vector3(vertices[2].Xpixel,  0, vertices[2].Ypixel );
+
+					
+						for(int y = minyi; y < maxyi; y++)
+						{
+							for(int x = minxi; x < maxxi; x++)
+							{
+				
+								if(IsUVInSide( p2, p1,p0, new Vector3(x,0, y) ))
+								{
+									int idx = y * 256 + x;  
+		
+									cols[idx].a = 1;
+								}
+					
+							}
+				
+						}
+						
+					}
+					else
+					{
+						for(int y = minyi; y < maxyi; y++)
+						{
+							for(int x = minxi; x < maxxi; x++)
+							{
+				
+								//if(IsUVInSide( p2, p1,p0, new Vector3(x,0, y) ))
+								//{
+									int idx = y * 256 + x;  
+		
+									cols[idx].a = 1;
+								//}
+					
+							}
+				
+						}
+						
+						
+					}
+						
+
+				
+				} //end transparancy flag check
+			}
+			
+        }
 
 		//pack tiles
-		float uvlength = 1.0f/16.0f;
-		uvRects = new Rect[leveldata.m_MaxTiles];
-		Texture2D tex = new Texture2D (256, 256 * 16,TextureFormat.ARGB32,false,true);
+		float uvlength = 1.0f/ (float)(leveldata.m_MaxTiles); //bug fixed: used leveldata.m_MaxTiles instead of hardcoded value 16
+        uvRects = new Rect[leveldata.m_MaxTiles];
+		Texture2D tex = new Texture2D (256, 256 * leveldata.m_MaxTiles, TextureFormat.ARGB32,false,true);
 		tex.filterMode  = FilterMode.Bilinear;
 		tex.wrapMode = TextureWrapMode.Clamp;
 		tex.anisoLevel = 9;
-		
-		for(int t = 0; t < leveldata.m_MaxTiles; t++)
-		{
-			Color[] cols = ColorTable[t];
-			uvRects[t] = new Rect(0,uvlength * t,1,uvlength);  //distorted uv error : reason careless uv stting
-			tex.SetPixels (0,256 * t, 256,256, cols, 0);
-		}
+
+    
+        for (int t = 0; t < leveldata.m_MaxTiles; t++)
+        {
+           Color[] cols = ColorTable[t];
+           uvRects[t] = new Rect(0, uvlength * t, 1, uvlength);  //distorted uv error : reason careless uv stting
+           tex.SetPixels(0, 256 * t, 256, 256, cols, 0);
+        }
+     
 		
 		tex.Apply(true);
 		tex.name = "texAtlas";
 		tex.hideFlags = 0;
 			
-#if UNITY_WEBPLAYER
-				//do nothing. casue web player can not access disk
-#elif UNITY_EDITOR
-		
-		if(!Settings.LoadLevelFileFromUrl)
-		{
-			if(!Directory.Exists(Application.dataPath + "/Level Texture/"))
-			{
-				Directory.CreateDirectory(Application.dataPath + "/Level Texture/");
-			}
-			//if(!File.Exists(Application.dataPath + "/Level Texture/" + Level.m_LevelName + ".png"))
-			File.WriteAllBytes(Application.dataPath + "/Level Texture/" + Level.m_LevelName + ".png",tex.EncodeToPNG());
-		}
-#endif
-		
 		return tex;
+	}
+	
+	public static bool IsUVInSide(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 test_point)
+	{
+		Vector3 vec1 = (p1 - p0);
+		Vector3 vec2 = (p2 - p1);
+		Vector3 vec3 = (p0 - p2);
+		
+		Vector3 in1 = Vector3.Cross(Vector3.up, vec1.normalized).normalized;
+		Vector3 in2 = Vector3.Cross(Vector3.up, vec2.normalized).normalized;
+		Vector3 in3 = Vector3.Cross(Vector3.up, vec3.normalized).normalized;
+		
+		if(Vector3.Dot(in1,(test_point - p0).normalized ) < 0) return false;
+		if(Vector3.Dot(in2,(test_point - p1).normalized ) < 0) return false;
+		if(Vector3.Dot(in3,(test_point - p2).normalized ) < 0) return false;
+		
+		return true;
 	}
 	
 

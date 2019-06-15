@@ -36,9 +36,15 @@ public class Browser : MonoBehaviour {
 		}
 		
 		m_windowRect = new Rect(Screen.width * 0.1f, Screen.height * 0.1f,Screen.width - Screen.width * 0.3f, 300);
-	}
- 
-	protected void OnGUI () {
+
+
+#if !UNITY_EDITOR && UNITY_WEBGL
+    WebGLInput.captureAllKeyboardInput = true;  //
+#endif
+
+    }
+
+    protected void OnGUI () {
 		GUI.DrawTexture(new Rect(0,0, Screen.width, Screen.height), m_TitleTex);
 		OnGUIMain();
 		if (m_fileBrowser != null) {
@@ -50,16 +56,26 @@ public class Browser : MonoBehaviour {
 	protected void OnGUIMain() 
 	{
 		GUI.enabled = !(m_showingUrlWindow || m_showingBrowserWindow);
-		GUI.Label(new Rect(10,Screen.height * 0.08f,Screen.width,50),"Select Tomb Raider II level file (*.tr2)" ,  m_TextStyle);
+		GUI.Label(new Rect(10,Screen.height * 0.06f,Screen.width,50),"Select Tomb Raider II level file (*.tr2)" ,  m_TextStyle);
 	
 		
 		if (GUI.Button(new Rect(10,Screen.height - 80, 150, 35),  "Load Level From Web")) 
 		{
-			m_showingUrlWindow = true;
+            Settings.LoadDemoLevel = false; //fixed unwated demo level load
+            m_showingUrlWindow = true;
 		}
-		else if (GUI.Button(new Rect(170,Screen.height - 80, 150, 35),  "Browse Level")) 
+
+#if UNITY_WEBGL
+
+        //do nothing
+#else
+        else if (GUI.Button(new Rect(170,Screen.height - 80, 150, 35),  "Browse Level")) 
 		{
-			string m_currentDir = PlayerPrefs.GetString("Level_Path");
+
+            Settings.LoadDemoLevel = false; //fixed unwated demo level load
+            Settings.LoadLevelFileFromUrl = false;
+
+            string m_currentDir = PlayerPrefs.GetString("Level_Path");
 			if(m_currentDir == null )
 			{
 				m_currentDir = Directory.GetCurrentDirectory();
@@ -73,7 +89,9 @@ public class Browser : MonoBehaviour {
 			m_fileBrowser.DirectoryImage = m_directoryImage;
 			m_fileBrowser.FileImage = m_fileImage;
 			m_showingBrowserWindow = true;
-		}
+
+        }
+#endif
 		else if(GUI.Button(new Rect(330,Screen.height - 80, 150, 35),  "Load Demo")) 
 		{
 			Settings.LevelFileLocalPath = Application.persistentDataPath + "/Resources/HILTOP.TR2";
@@ -81,7 +99,8 @@ public class Browser : MonoBehaviour {
 			Settings.LevelFileLocalPath = Application.dataPath + "/Resources/HILTOP.TR2";
 #endif
 			Settings.LoadDemoLevel = true;
-			m_showLevelLoaingMessage = true;
+            Settings.LoadLevelFileFromUrl = false;
+            m_showLevelLoaingMessage = true;
 			
 		}
 		
@@ -150,10 +169,10 @@ public class Browser : MonoBehaviour {
 	// Update is called once per frame
 	void Update () 
 	{
-		// show status of data download
-		if(Loader.m_RawFileData == null)
-		{
-			if(m_www!=null)
+        // show status of data download
+        //if(Loader.m_RawFileData == null)  // force download by disabling existance check of Loader.m_RawFileData
+        //{
+        if (m_www!=null)
 			{
 				m_DownloadProgress = m_www.progress * 100f;
 			}
@@ -173,7 +192,7 @@ public class Browser : MonoBehaviour {
 				m_www = null;
 			}
 			
-		}
+		//}
 	}
 	
 	void LateUpdate()

@@ -87,9 +87,9 @@ public class GUIManager : MonoBehaviour {
 		else
 		{
 			m_Helptext =
-			"Run - Up arrow\n" +
+			"Run/Swim - Up arrow\n" +
 			"Walk - Num 5\n" +
-			"Jump - Right mouse button\n" +
+			"Jump/Dive - Right mouse button\n" +
 			"Look around - Move mouse while pressing left mouse button.\n" +
 			"Long Jump - Press jump while you are running.\n" +
 			"Short Jump - Press up arrow + jump same time.\n" +
@@ -108,10 +108,10 @@ public class GUIManager : MonoBehaviour {
 	{
 		//GUI.Box(new Rect(0,Screen.height - 25,Screen.width,50),"" );
 		//GUI.Label(m_DisplayRect,m_HtmlFormat + m_DisplayInfo, m_GUIStyle);
-		if(GUI.Button(new Rect(Screen.width - 110,Screen.height - 35, 100, 30), "Exit"))
+		if(GUI.Button(new Rect(Screen.width - 110,Screen.height - 35, 100, 30), "Back"))
 		{
-			Application.Quit();
-		}
+            Application.LoadLevel("Browser"); //this will destroy all game object, refferences, event handlers in current scene
+        }
 		
 		
 		if(GUI.Button(new Rect(10,Screen.height - 35, 100, 30), "Help"))

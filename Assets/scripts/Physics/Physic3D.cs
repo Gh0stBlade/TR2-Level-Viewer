@@ -14,9 +14,11 @@ public class Physic3D {
 	Quaternion rotation ; //Current world space rotation of parent transform
 	Vector3 Start = Vector3.zero; //Jump start position
 	bool HasValidCurve = false;
-	float FreefallSpeed = 0.5f;
-
-	public Physic3D(Vector3 startpos)
+	float FreefallSpeed = 1f;
+    public delegate void DidReachedMaxHeight();
+    public event DidReachedMaxHeight OnReachedMaximumHeight;
+    bool ReachedMaximumHeight = false;
+    public Physic3D(Vector3 startpos)
 	{
 		Start = startpos;
 	}
@@ -33,6 +35,17 @@ public class Physic3D {
 		float dx = deltatime * Hv ;
 		float dy = Vv * deltatime - (0.5f * g * deltatime * deltatime);
 		Vector3 posvec = new Vector3(0.0f,dy,dx);
+
+        if(dy > (Vd * 0.8f))
+        {
+          
+            if(OnReachedMaximumHeight != null && !ReachedMaximumHeight)
+            {
+                OnReachedMaximumHeight();
+                ReachedMaximumHeight = true;
+            }
+        }
+		//Debug.Log("Physic3D: Jump ");
 		return Start + rotation * posvec;
   	}		
 	
@@ -74,9 +87,12 @@ public class Physic3D {
 		{		
 			HasValidCurve = false;
 			
-		}		
+		}
 
-		return HasValidCurve;
+        ReachedMaximumHeight = false;
+
+
+        return HasValidCurve;
 		
 	}
 	
@@ -189,7 +205,7 @@ public class Physic3D {
 
 	public Vector3 UpdateFreeFall(float deltatime)
 	{
-		float dy = - (4* g * deltatime * deltatime) * FreefallSpeed;
+		float dy = - (0.5f* g * deltatime * deltatime) * FreefallSpeed;
 		Vector3 posvec = new Vector3(0.0f,dy,0);
 		return Start + posvec;
 	}
@@ -198,6 +214,11 @@ public class Physic3D {
 	{
 		//SurfaceAnalyzer.Analyze(mesh.vertices,mesh.triangles,null);
 	}
+
+    public void SetFreeFallSpeed(float speed)
+    {
+        FreefallSpeed = speed;
+    }
 }
 
 

@@ -82,10 +82,17 @@ public class Action
 //	Up
 //}
 
+public enum SwimmingState{
+		None = 0,
+		InShallowWater = 32,
+		InDeepWater = 64,
+		InWaterSurface = 96,
+        Diving = 128
+	}
+
 public delegate void OnJumpDelegate(Vector3 From, Vector3 To, Quaternion rot , float sign);
 public delegate void OnMovementDelegate(Vector3 dir, float speed);
 public delegate void OnJumpingDelegate(Vector3 dir);
-public delegate int OnPrimaryActionDelegate();
 
 public class LaraStatePlayer: MonoBehaviour {
 	//public tr2_moveable_struct movableobj;
@@ -116,16 +123,26 @@ public class LaraStatePlayer: MonoBehaviour {
 	public bool OnAir = false;
 	public bool crossfading = false;
 	public bool busy = false;
+    public bool diving = false;
 
 	AudioSource SfxSource = null;
 	//These are events that handled elsewhere. Events are generated from this class
 	public static event OnJumpDelegate OnJump;
 	public static event OnMovementDelegate OnMovement;
 	public static event OnJumpingDelegate OnJumping;
-	public static event OnPrimaryActionDelegate OnPrimaryAction;
-	
-	// Use this for initialization
-	void Start () {
+
+	//flags for swimming staatee
+	public SwimmingState m_SwimState = SwimmingState.None;
+    float m_CurrentAnimationFrameTime = 0;
+
+    AudioClip sfx_dive;
+    AudioClip sfx_dive_shallow;
+    AudioClip sfx_pull_out_water;
+    AudioClip sfx_landed_from_jump;
+    AudioClip sfx_start_jump;
+
+    // Use this for initialization
+    void Start () {
 		
 		//Animation state codes are coupled with keycodes. Initialised Keymapper first.
 		KeyMapper.InitKeyCode();
@@ -197,10 +214,19 @@ public class LaraStatePlayer: MonoBehaviour {
 			//switching[197]
 			//61,62 : walk back
 		*/
-
+		Debug.Log("Anim ID: Wadding " + "177" + " " + "State ID:" +  tranimations[177].stateid);    //65
+		
+		Debug.Log("Anim ID: inwater swimming " + "86" + " " + "State ID:" +  tranimations[86].stateid);    //17
+		Debug.Log("Anim ID: inwater idle " + "108" + " " + "State ID:" +  tranimations[108].stateid);    //13
+		
+		Debug.Log("Anim ID: surface_water swimming " + "116" + " " + "State ID:" +  tranimations[116].stateid);    //34
+		Debug.Log("Anim ID: surface idle " + "110" + " " + "State ID:" +  tranimations[110].stateid);    //33
+		
+		Debug.Log("Anim ID: surface pullup " + "111" + " " + "State ID:" +  tranimations[111].stateid);    //33
 		//build statemap and actions array.
-		statemap = new State[256 + 64];
-		actions = new Action[256 + 64];
+		//Update add 4 animation layer with each layer size 32 [normal, shallow, inwater, surface ]
+		statemap = new State[128 + 8];   
+		actions = new Action[128 + 8];
 
 		//statemap[KeyMapper.Search] = new State ("KeyMapper.Search", -1,-1);
 		//statemap[KeyMapper.Menu] = new State( "KeyMapper.Menu", - 1,-1);
@@ -244,17 +270,21 @@ public class LaraStatePlayer: MonoBehaviour {
 		statemap[KeyMapper.PullUpHigh] = new State("PullUpHigh",19,97);  statemap[KeyMapper.PullUpHigh].moving = false; statemap[KeyMapper.PullUpHigh].movedir = Vector3.up * 0.35f;
 		statemap[KeyMapper.PullUpAcrobatic] = new State("PullUpAcrobatic",54,159);  statemap[KeyMapper.PullUpAcrobatic].moving = false; statemap[KeyMapper.PullUpAcrobatic].movedir = Vector3.up * 0.35f;
 		statemap[KeyMapper.WalkUp] = new State("WalkUp",2,50);  statemap[KeyMapper.WalkUp].moving = false; statemap[KeyMapper.WalkUp].movedir = Vector3.up * 0.35f;
-		//Add some sfx to the state pull up. I'm not sure weather it should be done here or else where
+		
+        //Add some sfx to the state pull up. I'm not sure weather it should be done here or else where
 		statemap[KeyMapper.PullUpHigh].sfx = new AudioClip[1];
 		statemap[KeyMapper.PullUpHigh].sfx[0] = (AudioClip)Resources.Load("sfx/pull_up", typeof(AudioClip));
-		
-		/*
+
+        statemap[KeyMapper.WalkUp].sfx = new AudioClip[1];
+        statemap[KeyMapper.WalkUp].sfx[0] = (AudioClip)Resources.Load("sfx/pull_up", typeof(AudioClip));
+
+        /*
 		 * 
 		 * Now build a array of action, where action stores a list of State objects. Generally
 		 * one state is stored in each action but more can be added to build up complex action
 		 * */
-	
-		actions[KeyMapper.Idle] = new Action("KeyMapper.Idle");   
+
+        actions[KeyMapper.Idle] = new Action("KeyMapper.Idle");   
 		actions[KeyMapper.PrimaryAction] = new Action ("Primary Action"); 
 		actions[KeyMapper.DrawWeapon] = new Action ("KeyMapper.DrawWeapon");  
 		actions[KeyMapper.Roll] = new Action ("KeyMapper.Roll"); 
@@ -306,16 +336,131 @@ public class LaraStatePlayer: MonoBehaviour {
 		actions[KeyMapper.PullUpAcrobatic].AddState(statemap[KeyMapper.PullUpAcrobatic],1,0);
 		actions[KeyMapper.WalkUp].AddState(statemap[KeyMapper.WalkUp],1,0);
 
+        /*
+		 * Added new states  shallow water movment  layer (offset 32)
+		 * 
+		 * */
+        int swimstate = (int)SwimmingState.InShallowWater;
 
-		thistransform = transform;
+        statemap[KeyMapper.Idle + swimstate] = new State("KeyMapper.Idle: from shallow water", 2,103);statemap[KeyMapper.Idle + swimstate].loop = true;
+		statemap[KeyMapper.Run + swimstate] = new State ("KeyMapper.Run: from shallow water", 65,177);  statemap[KeyMapper.Run + swimstate].loop = true; statemap[KeyMapper.Run + swimstate].moving = true; statemap[KeyMapper.Run + swimstate].Speed = 3;
+		statemap[KeyMapper.Jump + swimstate] = new State("Jump: from shallow water", 28,28);  statemap[KeyMapper.Jump + swimstate].OnAir = true; statemap[KeyMapper.Jump + swimstate].movedir = Vector3.up * 0.35f;
+		statemap[KeyMapper.WalkUp + swimstate] = new State("WalkUp: from shallow water", 2,50);  statemap[KeyMapper.WalkUp + swimstate].moving = false; statemap[KeyMapper.WalkUp + swimstate].movedir = Vector3.up * 0.35f;
+        statemap[KeyMapper.PullUpHigh + swimstate] = new State("PullUpHigh", 19, 97); statemap[KeyMapper.PullUpHigh].moving = false; statemap[KeyMapper.PullUpHigh].movedir = Vector3.up * 0.35f;
+       
+        actions[KeyMapper.Idle + swimstate] = new Action("KeyMapper.Idle: from shallow water");  
+		actions[KeyMapper.Idle + swimstate].AddState(statemap[KeyMapper.Idle + swimstate],1,0);
+
+		actions[KeyMapper.Run + swimstate] = new Action ("KeyMapper.Run: from shallow water"); 
+		actions[KeyMapper.Run + swimstate].AddState(statemap[KeyMapper.Run + swimstate],1,0); 
+		
+		actions[KeyMapper.Jump + swimstate] = new Action("Jump: from shallow water"); 
+		actions[KeyMapper.Jump + swimstate].AddState(statemap[KeyMapper.Jump + swimstate],1,0); 
+		
+		actions[KeyMapper.WalkUp + swimstate] = new Action("WalkUp: from shallow water"); 
+		actions[KeyMapper.WalkUp + swimstate].AddState(statemap[KeyMapper.WalkUp + swimstate],1,0);
+
+        //add sfx
+        statemap[KeyMapper.WalkUp + swimstate].sfx = new AudioClip[1];
+        statemap[KeyMapper.WalkUp + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/splash2", typeof(AudioClip));
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx = new AudioClip[1];
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/pull_up", typeof(AudioClip));
+        statemap[KeyMapper.Run + swimstate].sfx = new AudioClip[2];
+        statemap[KeyMapper.Run + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/shallow-water", typeof(AudioClip));
+        statemap[KeyMapper.Run + swimstate].sfx[1] = (AudioClip)Resources.Load("sfx/shallow-water", typeof(AudioClip));
+
+
+        /*
+		 * Added new states  deep water movment  layer (offset 64)
+		 * 
+		 * */
+        swimstate = (int)SwimmingState.InDeepWater;
+
+        statemap[KeyMapper.Idle + swimstate] = new State("KeyMapper.Idle",13,108);statemap[KeyMapper.Idle + swimstate].loop = true;
+		statemap[KeyMapper.Run + swimstate] = new State ("KeyMapper.Run", 17,86);  statemap[KeyMapper.Run + swimstate].loop = true; statemap[KeyMapper.Run + swimstate].moving = true; statemap[KeyMapper.Run + swimstate].Speed = 6;
+		//statemap[KeyMapper.Jump] = new State("Jump",28,28);  statemap[KeyMapper.Jump].OnAir = true; statemap[KeyMapper.Jump].movedir = Vector3.up * 0.35f;
+
+		actions[KeyMapper.Idle + swimstate] = new Action("KeyMapper.Idle");  
+		actions[KeyMapper.Idle + swimstate].AddState(statemap[KeyMapper.Idle + swimstate],1,0);
+
+		actions[KeyMapper.Run + swimstate] = new Action ("KeyMapper.Run"); 
+		actions[KeyMapper.Run + swimstate].AddState(statemap[KeyMapper.Run + swimstate],1,0);
+
+        //add sfx
+        statemap[KeyMapper.Run + swimstate].sfx = new AudioClip[2];
+        statemap[KeyMapper.Run + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/swim", typeof(AudioClip));
+        statemap[KeyMapper.Run + swimstate].sfx[1] = (AudioClip)Resources.Load("sfx/swim", typeof(AudioClip));
+
+        /*
+		 * Added new states  surface water movment  layer (offset 96)
+		 * 
+		 * */
+
+        swimstate = (int)SwimmingState.InWaterSurface;
+
+        statemap[KeyMapper.Idle + swimstate] = new State("Idle Surface",33,110);statemap[KeyMapper.Idle + swimstate].loop = true; statemap[KeyMapper.Idle + swimstate].Speed = 3;
+		statemap[KeyMapper.Run + swimstate] = new State ("Swim Surface", 34,116);  statemap[KeyMapper.Run + swimstate].loop = true; statemap[KeyMapper.Run + swimstate].moving = true; statemap[KeyMapper.Run + swimstate].Speed = 3;
+        statemap[KeyMapper.Run + swimstate].sfx = new AudioClip[2];
+        statemap[KeyMapper.Run + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/treading", typeof(AudioClip));
+        statemap[KeyMapper.Run + swimstate].sfx[1] = (AudioClip)Resources.Load("sfx/treading", typeof(AudioClip));
+
+        statemap[KeyMapper.PullUpHigh + swimstate] = new State("PullUpHigh", 55, 111); statemap[KeyMapper.PullUpHigh + swimstate].moving = false; statemap[KeyMapper.PullUpHigh + swimstate].movedir = Vector3.up * 0.35f;
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx = new AudioClip[1];
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/splash2", typeof(AudioClip));
+
+        actions[KeyMapper.Idle + swimstate] = new Action("Idle Surface");  
+		actions[KeyMapper.Idle + swimstate].AddState(statemap[KeyMapper.Idle + swimstate],1,0);
+    
+		actions[KeyMapper.Run + swimstate] = new Action ("Swim Surface"); 
+		actions[KeyMapper.Run + swimstate].AddState(statemap[KeyMapper.Run + swimstate],1,0);
+
+        actions[KeyMapper.PullUpHigh + swimstate] = new Action("Pull Out From Water");
+        actions[KeyMapper.PullUpHigh + swimstate].AddState(statemap[KeyMapper.PullUpHigh + swimstate], 1,0);
+
+        actions[KeyMapper.Jump + swimstate] = new Action("Dive Into Water");
+        actions[KeyMapper.Jump + swimstate].AddState(statemap[KeyMapper.Jump + swimstate], 1, 0);
+
+        //add sfx
+        statemap[KeyMapper.Run + swimstate].sfx = new AudioClip[2];
+        statemap[KeyMapper.Run + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/treading", typeof(AudioClip));
+        statemap[KeyMapper.Run + swimstate].sfx[1] = (AudioClip)Resources.Load("sfx/treading", typeof(AudioClip));
+
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx = new AudioClip[1];
+        statemap[KeyMapper.PullUpHigh + swimstate].sfx[0] = (AudioClip)Resources.Load("sfx/splash2", typeof(AudioClip));
+
+
+
+        /*
+         * Added new states for diving (offset 128)
+         * 
+         * */
+        swimstate = (int)SwimmingState.Diving;
+
+        statemap[KeyMapper.Jump + swimstate] = new State("Dive Into Water", 35, 119); statemap[KeyMapper.Jump + swimstate].OnAir = false;
+        actions[KeyMapper.Jump + swimstate] = new Action("Dive Into Water");
+        actions[KeyMapper.Jump + swimstate].AddState(statemap[KeyMapper.Jump + swimstate], 1, 0);
+
+
+
+        //state map for dive in air
+        statemap[KeyMapper.DiveInAir] = new State("Dive Air", 52, 156);
+
+        actions[KeyMapper.DiveInAir] = new Action("Dive in air");
+        actions[KeyMapper.DiveInAir].AddState(statemap[KeyMapper.DiveInAir], 1, 0);
+
+
+        thistransform = transform;
 		SfxSource = gameObject.AddComponent<AudioSource>();
 		SfxSource.volume = 0.35f;
 		rootanim = (Animation) GetComponent(typeof(Animation));
 		//initialse states
-		prevkeystate = currentkeystate = KeyMapper.Idle;
-		current_action = actions[KeyMapper.Idle];
-		current_state = actions[KeyMapper.Idle].state[0];
-		rootanim.Play("" + current_state.AnimationID);
+		prevkeystate = currentkeystate = KeyMapper.Idle + (int)m_SwimState;
+		current_action = actions[KeyMapper.Idle + (int)m_SwimState ];
+		current_state = actions[KeyMapper.Idle + (int)m_SwimState ].state[0];
+		if(current_state.AnimationID < rootanim.GetClipCount()) 
+		{
+			rootanim.Play("" + current_state.AnimationID);
+		}
 		rootanim.wrapMode = WrapMode.Loop;
 		current_action.time = Time.time;
 		crossfading = false;
@@ -359,6 +504,7 @@ public class LaraStatePlayer: MonoBehaviour {
 	
 	void InitAction(int keystate, float time )
 	{
+        if (keystate >= actions.Length) return;
 		if(actions[keystate] != null)
 		{
 			current_action.Reset();
@@ -379,21 +525,34 @@ public class LaraStatePlayer: MonoBehaviour {
 		{
 			if(current_action!= null && current_state!=null && current_state.AnimationID != -1 && !collide)
 			{
+				if(current_state.AnimationID>= rootanim.GetClipCount()) return;
 				//rootanim.Play("" + current_state.AnimationID);
 				AnimationState animstate = rootanim["" + current_state.AnimationID];
-				animstate.time = Time.time - current_action.time;
-				//Debug.Log(animstate.speed);
-				if(Time.time - current_action.time > animstate.length )
-				{
-					HandleSFX(currentkeystate);
-				}
+                m_CurrentAnimationFrameTime = Time.time - current_action.time;
+                animstate.time = m_CurrentAnimationFrameTime;
+                //Debug.Log(animstate.speed);
 
-				if(Time.time - current_action.time > animstate.length * 0.1f)
+                if (m_SwimState == SwimmingState.None || m_SwimState == SwimmingState.InShallowWater)
+                {
+                    if (Mathf.Repeat(m_CurrentAnimationFrameTime, animstate.length * 0.5f) < 0.1f)
+                    {
+                        HandleSFX(currentkeystate);
+                    }
+                }
+                else
+                {
+                    if (Mathf.Repeat(m_CurrentAnimationFrameTime, animstate.length ) < 0.1f)
+                    {
+                        HandleSFX(currentkeystate);
+                    }
+                }
+
+				if(m_CurrentAnimationFrameTime > 0)  //custom animation event
 				{
 					busy = true;
 					HandleState(animstate);
 				}
-				else if(Time.time - current_action.time > animstate.length)
+				else if(m_CurrentAnimationFrameTime > animstate.length)
 				{
 					busy = false;
 					current_action.time = Time.time;
@@ -405,6 +564,7 @@ public class LaraStatePlayer: MonoBehaviour {
 	void HandleState(AnimationState animstate)
 	{
 	
+        //Check state change
 		if(prevkeystate != currentkeystate && OnAir == false)
 		{
 			//Debug.Log("["+ Time.time + "]" + " currentkeystate:" + currentkeystate + " prevkeystate: "+ prevkeystate);
@@ -427,7 +587,7 @@ public class LaraStatePlayer: MonoBehaviour {
 	
 	void GotoState(int state)
 	{
-		if(state == KeyMapper.Idle)
+		if(state == (KeyMapper.Idle + (int)m_SwimState))
 		{
 			KeyMapper.reset = true;	
 		}
@@ -438,26 +598,47 @@ public class LaraStatePlayer: MonoBehaviour {
 	}
 
 
-	public void OnCollision(Collider other)
+	public void OnCollision(GameObject other)
 	{
-		//Debug.Log("Player Collide With Object:" + other.name);
+        if (other != null)
+        {
+            Debug.Log("Player Collide With Object:" + other.name);
+
+            if (OnAir)
+            {
+                SoundMananger.PlayLandedSFX();
+            }
+        }
+
 		//collide = true;
 		OnAir = false;
 		shortjump = false;
-		GotoState(KeyMapper.Idle);
-	}
+		GotoState(KeyMapper.Idle + (int)m_SwimState);
+		
+		Debug.Log("OnCollision:" + m_SwimState);
+        diving = false;
+
+    }
 
 	public void OnPullUp(int statecode)
 	{
 		OnAir = false;
-		currentkeystate = statecode;
-	}
+		currentkeystate = statecode + (int)m_SwimState;
+        PlayPullUpSFX();
+    }
 
-	public void OnExitCollision(Collider other)
+    public void Dive()
+    {
+        diving = true;
+        GotoState(KeyMapper.DiveInAir + (int)m_SwimState);
+    }
+
+
+	/*public void OnExitCollision(Collider other)
 	{
 		Debug.Log("Player OnExitCollision:" + other.name);
 		collide = false;
-	}
+	}*/
 
 	//StateCode
 	int firstkeystate = 0;
@@ -465,6 +646,7 @@ public class LaraStatePlayer: MonoBehaviour {
 
 	public void StateCodeHandler(int keystate, int otherkey, float time)
 	{
+        if (diving) return;
 		//if(keystate == jumpBack) return;
 		if(OnAir || collide) return;
 		//if(busy) return;
@@ -480,7 +662,7 @@ public class LaraStatePlayer: MonoBehaviour {
 		{
 			currentkeystate = firstkeystate;
 		}
-		Debug.Log(" FinalizeStateCode: " +  firstkeystate );
+		//Debug.Log(" FinalizeStateCode: " +  firstkeystate );
 		/*if(prevkeystate == KeyMapper.Idle)
 		{
 			HandleState(rootanim["" + current_state.AnimationID]);
@@ -491,26 +673,18 @@ public class LaraStatePlayer: MonoBehaviour {
 	{
 		if(secondkeystate == 0)
 		{
-			//Debug.Log(" FinalizeStateCode: " +  firstkeystate );
-			if(firstkeystate == 17 /*KeyMapper.PrimaryAction*/)  //Up arrow + Left Mouse press
-			{
-				if(OnPrimaryAction != null) 
-				{
-					currentkeystate = OnPrimaryAction();
-				}
-			}
-			else
-			{
-				currentkeystate = firstkeystate;
-			}
-		}
-	}
+            currentkeystate = firstkeystate + (int)m_SwimState;
+            //Debug.Log(" FinalizeStateCode: " + firstkeystate);
+			//Debug.Log(" State Layer: " + (int)m_SwimState);
+        }
+    }
 
 	public void IdleStateHandler(int keystate , float time)
 	{
+        if (diving) return;
 		if(OnAir) return;
 		//if(busy) return;
-		currentkeystate = keystate;
+		currentkeystate = keystate + (int)m_SwimState;
 	}
 
 	float slowmotion = 1.0f;
@@ -537,15 +711,17 @@ public class LaraStatePlayer: MonoBehaviour {
 	}
 
 
-	public static TRAnimStateChange gunitystatechange = null;
-	public static int animdispatchcount = 0;
-	
-	void StateCrossFade(State from, State to)
+	static TRAnimStateChange gunitystatechange = null;
+	static int animdispatchcount = 0;
+    static State from_state = null;
+    static Parser.Tr2AnimDispatch dispatcher = null;
+
+    void StateCrossFade(State from, State to)
 	{
 		if(from!=null && from.StateID !=-1  && to!=null && to.StateID!= -1)
 		{
 			//Debug.Log("Cross fade");
-			//Debug.Log("Cross fade from: " + from.name + " to:" + to.name );
+			Debug.Log("Cross fade from: " + from.name + " to:" + to.name );
 			int nstatechange = 	tranimations[from.AnimationID].statechanges.Count;
 			for(int statechangeid = 0; statechangeid < nstatechange; statechangeid++)
 			{	
@@ -557,12 +733,25 @@ public class LaraStatePlayer: MonoBehaviour {
 					crossfading = true;
 					rootanim.Stop();
 					current_state = to;
-					
-					if(from == statemap[KeyMapper.Idle])
-					Debug.Log("Cross fade from: " + from.AnimationID + " to:" + unitystatechange.stateid + " nstatechange: "+ nstatechange );
-					CrossFadeHandler();
+                    from_state = from;
+
+                    if (from == statemap[KeyMapper.Idle + (int)m_SwimState])
+					{
+                        int nextanim = -1;
+                        if (gunitystatechange.tr2dispatchers.Count > 0)
+                        {
+                            Parser.Tr2AnimDispatch unityanimdispacher = gunitystatechange.tr2dispatchers[animdispatchcount];
+                            nextanim = unityanimdispacher.NextAnimation;
+                        }
+
+                        Debug.Log("Cross fade from: " + from.AnimationID + " to: " + nextanim + "where state id" + unitystatechange.stateid + "Number of sequence" + gunitystatechange.tr2dispatchers.Count);
+
+                        if (nextanim == 190 && m_SwimState == SwimmingState.InWaterSurface) break;
+
+                    }
+                    dispatcher = SelectDispatcher(gunitystatechange, from_state.AnimationID, m_CurrentAnimationFrameTime);
+                    CrossFadeHandler();
 					return;
-					
 				}
 			}
 			
@@ -577,21 +766,42 @@ public class LaraStatePlayer: MonoBehaviour {
 	
 	void CrossFadeHandler()
 	{
-		if(animdispatchcount < gunitystatechange.dispatchers.Count)
-		{
-			TRAnimDispatcher unityanimdispacher = gunitystatechange.dispatchers[animdispatchcount];
-			rootanim.Play("" + unityanimdispacher.NextAnimation);
-			rootanim.wrapMode = WrapMode.Once;
-			Invoke("CrossFadeHandler", tranimations[unityanimdispacher.NextAnimation].endtime);
-			animdispatchcount = gunitystatechange.dispatchers.Count;
-		}
-		else
-		{
-			PlayCurrentState(current_state);
-		}
+        if(dispatcher != null)
+        {
+            rootanim.Play("" + dispatcher.NextAnimation);
+            //dispatcher.NextFrame
+            rootanim.wrapMode = WrapMode.Once;
+            Invoke("CrossFadeHandler", tranimations[dispatcher.NextAnimation].endtime);
+            dispatcher = null;
+        }
+        else
+        {
+            PlayCurrentState(current_state);
+        }
 	}
 
-	void PlayCurrentState(State state)
+    Parser.Tr2AnimDispatch SelectDispatcher(TRAnimStateChange target_statechange,int current_anim_id, float current_frame_time)
+    {
+
+        if (target_statechange == null) return null;
+
+        //Calculate Animation Frame Index relative to Entity (Lara)
+
+        int frame_offset = (int)(current_frame_time / tranimations[current_anim_id].time_per_frame);
+        int current_frame_index = tranimations[current_anim_id].start_animation_frame_index + frame_offset;
+
+        for (int i = 0; i < target_statechange.tr2dispatchers.Count; i++ )
+        {
+            Parser.Tr2AnimDispatch dispatcher = target_statechange.tr2dispatchers[i];
+            if (current_frame_index >= dispatcher.Low && current_frame_index <= dispatcher.High)
+            {
+                return dispatcher;
+            }
+        }
+        return null;
+    }
+
+    void PlayCurrentState(State state)
 	{
 		crossfading = false;
 		if(current_action!= null && state!=null && state.AnimationID != -1)
@@ -605,48 +815,80 @@ public class LaraStatePlayer: MonoBehaviour {
 			{
 				rootanim.wrapMode = WrapMode.Once;
 			}
-			current_action.time = Time.time;
-			OnAir = state.OnAir;
-			
-			if(OnAir)
-			{
-				Vector3 jumpdir = thistransform.rotation * state.movedir;
-				//Notify Jump Physics Handler
-				if(OnJump != null) OnJump (thistransform.position, jumpdir * 2048, transform.rotation, (state.movedir.x + state.movedir.z));
-			}
+ 			current_action.time = Time.time;
+
+            //setup animation events
+            if (!diving)
+            {
+                OnAir = state.OnAir;
+
+                if (OnAir)
+                {
+                    Vector3 jumpdir = thistransform.rotation * state.movedir;
+                    //Notify Jump Physics Handler
+                    if (OnJump != null) OnJump(thistransform.position, jumpdir * 2048 * Settings.SceneScaling, transform.rotation, (state.movedir.x + state.movedir.z));
+                    SoundMananger.PlayStartJumpFX();
+                }
+            }
 		}
 	}
 	
 	void HandleSFX(int state)
 	{
 		//TODO: SFX should bee played in specified event handler
-		if(state == KeyMapper.Run ||state == KeyMapper.Walk )
+		if(state == KeyMapper.Run 
+            ||state == KeyMapper.Walk 
+            || state == (KeyMapper.Run + (int) SwimmingState.InDeepWater) 
+            || state == (KeyMapper.Run + (int)SwimmingState.InWaterSurface) 
+            || state == (KeyMapper.Run + (int)SwimmingState.InShallowWater))
 		{
-			if(!SfxSource.isPlaying)
-			{
-				SfxSource.clip = statemap[KeyMapper.Run].sfx[0];
-				SfxSource.loop = false;
-				SfxSource.Play();
-			}
+            if (current_state != null && current_state.sfx != null)
+            {
+                SoundMananger.PlayMovementSFX(current_state.sfx[0]);
+            }
+
 		}
-		
-		if(state == KeyMapper.PullUpHigh)
-		{
-			if(!SfxSource.isPlaying)
-			{
-				SfxSource.clip = statemap[KeyMapper.PullUpHigh].sfx[0];
-				SfxSource.loop = false;
-				SfxSource.Play();
-			}
-		}
+
 	}
-	
-	/*
+
+    public void PlayPullUpSFX()
+    {
+        if (m_SwimState == SwimmingState.None
+            || m_SwimState == SwimmingState.InWaterSurface
+            || m_SwimState == SwimmingState.InShallowWater)
+        {
+            //if (current_state != null && current_state.sfx != null)
+            //{
+                SoundMananger.PlayPullUpSFX(statemap[KeyMapper.PullUpHigh + (int) m_SwimState].sfx[0]);
+           // }
+        }
+    }
+
+    public void PlayWalkUpSFX()
+    {
+        if (m_SwimState == SwimmingState.None || m_SwimState == SwimmingState.InShallowWater)
+        {
+            if (current_state != null && current_state.sfx != null)
+            {
+                SoundMananger.PlayWalkUpSFX(current_state.sfx[0]);
+            }
+        }
+    }
+
+    public void PlayDiveSFX()
+    {
+       // if (m_SwimState == SwimmingState.None || m_SwimState == SwimmingState.Diving)
+       // {
+                SoundMananger.PlayDiveSFX();
+        //}
+    }
+
+    /*
 	 * TODO:
 	 * Interface defination of some special response state
 	 * */
-	
-	public void LaraTakeDamageFront()
+
+    public void LaraTakeDamageFront()
 	{
 		//animation clip id 126
 	}
@@ -673,5 +915,10 @@ public class LaraStatePlayer: MonoBehaviour {
 	public void LaraDieHittingGround()
 	{
 		//animation clip id 139
+	}
+	
+	public  void SetSwimState(SwimmingState swimstate  )
+	{
+		m_SwimState = swimstate;
 	}
 }

@@ -18,6 +18,6 @@ public class FlashLightStatePlayer : MonoBehaviour {
 	void UpdateDayNight(bool isday)
 	{
 		if(light !=null) light.enabled = !isday;
-		Debug.Log(isday);
+		//Debug.Log(isday);
 	}
 }
